@@ -45,6 +45,7 @@ Server runs at `http://0.0.0.0:8081` (or `PORT` from env, e.g. 7860 on Hugging F
 | `CRAWL_MAX_PAGES` | 20 | Max pages for scrape_links |
 | `CRAWL_REQUEST_TIMEOUT` | 30 | HTTP timeout (seconds) |
 | `CRAWL_USER_AGENT` | Flocrawl/1.0 | User-Agent header |
+| `SEARCH_TIMEOUT` | 15 | Search request timeout (seconds) |
 
 ## MCP Client Config
 
@@ -63,7 +64,7 @@ Server runs at `http://0.0.0.0:8081` (or `PORT` from env, e.g. 7860 on Hugging F
 flocrawl/
 ├── src/flocrawl/
 │   ├── config.py    # Env and limits
-│   ├── search.py    # Web search (DuckDuckGo, no API key)
+│   ├── search.py    # Web search (DDGS metasearch: Bing, DuckDuckGo, etc.)
 │   ├── scraper.py   # Scrape, list links, crawl
 │   ├── server.py    # FastMCP server and tools
 │   ├── __init__.py
@@ -76,4 +77,4 @@ flocrawl/
 ## Requirements
 
 - Python 3.11+
-- httpx, beautifulsoup4, duckduckgo-search, fastmcp
+- httpx, beautifulsoup4, ddgs, fastmcp
