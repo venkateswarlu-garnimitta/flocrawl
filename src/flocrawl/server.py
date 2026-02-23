@@ -56,9 +56,13 @@ def _make_client() -> httpx.AsyncClient:
 mcp = FastMCP(
     "Flocrawl",
     instructions=(
-        "Flocrawl MCP Server. TOOL USAGE: For 2+ URLs to scrape, call scrape_urls_tool(urls=[...]) "
-        "once with all URLs. NEVER call scrape_url_tool repeatedly. scrape_url_tool is for ONE URL only. "
-        "Tools: search_web, scrape_url (1 URL), scrape_urls (2+ URLs, pass list), list_links, scrape_links."
+        "CRITICAL TOOL USAGE RULES - FOLLOW EXACTLY:\n"
+        "- If you need to scrape 1 URL: use scrape_url_tool(url='...')\n"
+        "- If you need to scrape 2+ URLs: use scrape_urls_tool(urls=[url1, url2, ...]) ONCE\n"
+        "- NEVER call scrape_url_tool multiple times for different URLs\n"
+        "- After search_web_tool, extract URLs and use scrape_urls_tool\n"
+        "- After list_links_tool, extract hrefs and use scrape_urls_tool\n"
+        "- scrape_urls_tool accepts list[str] or JSON string '[\"url1\",\"url2\"]'"
     ),
     json_response=True,
     streamable_http_path="/",
@@ -86,8 +90,8 @@ async def search_web_tool(
     """
     Perform a web search and return results with titles, URLs, and snippets.
 
-    Uses DuckDuckGo. No API keys required. To scrape the returned URLs, use
-    scrape_urls_tool with the list of URLs—not scrape_url_tool repeatedly.
+    CRITICAL: After this tool returns URLs, use scrape_urls_tool(urls=[url1, url2, ...])
+    with ALL URLs in one call. DO NOT call scrape_url_tool multiple times!
 
     Args:
         query: Search query string.
@@ -108,10 +112,11 @@ async def search_web_tool(
 @mcp.tool()
 async def scrape_url_tool(url: str) -> str:
     """
-    Scrape a single URL and extract main text content.
+    Scrape EXACTLY ONE URL and extract main text content.
 
-    For multiple URLs, use scrape_urls_tool instead—never call this tool
-    multiple times. This tool is for ONE URL only.
+    WARNING: Only use this for a single URL. If you have multiple URLs,
+    use scrape_urls_tool(urls=[url1, url2, ...]) instead. DO NOT call this
+    tool multiple times with different URLs!
 
     Args:
         url: Full URL to scrape (e.g. https://example.com/page).
@@ -133,9 +138,8 @@ async def list_links_tool(url: str, same_domain_only: bool = True) -> str:
     """
     List all links found on a webpage.
 
-    Fetches the URL and extracts anchor tags with href. Optionally filters
-    to links on the same domain only. To scrape the returned links, use
-    scrape_urls_tool with the href list—not scrape_url_tool repeatedly.
+    CRITICAL: After this tool returns hrefs, use scrape_urls_tool(urls=[href1, href2, ...])
+    with ALL hrefs in one call. DO NOT call scrape_url_tool multiple times!
 
     Args:
         url: Full URL to fetch and analyze.
@@ -207,9 +211,11 @@ def _normalize_urls_input(urls) -> list[str]:
 @mcp.tool()
 async def scrape_urls_tool(urls: list[str] | str) -> str:
     """
-    Scrape multiple URLs in parallel. Use for 2+ URLs—never call scrape_url_tool repeatedly.
+    Scrape MULTIPLE URLs in parallel. REQUIRED for 2+ URLs.
 
-    Pass all URLs in one call. urls can be a list or JSON string like '["url1","url2"]'.
+    This is the CORRECT tool to use when you have multiple URLs from search results
+    or link listings. Pass ALL URLs in one call: urls=["url1", "url2", ...]
+    or as JSON string: urls='["url1","url2"]'
 
     Args:
         urls: List of URLs or JSON array string (e.g. ["https://a.com/1", "https://a.com/2"]).
