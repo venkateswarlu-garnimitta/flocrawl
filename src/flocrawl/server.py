@@ -20,8 +20,8 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from flotorch_crawl.scraper import list_links, scrape_links, scrape_url
-from flotorch_crawl.search import search_web
+from flocrawl.scraper import list_links, scrape_links, scrape_url
+from flocrawl.search import search_web
 
 logging.basicConfig(
     format="[%(levelname)s] %(name)s: %(message)s",

@@ -12,4 +12,4 @@ RUN pip install -e .
 ENV PORT=7860
 EXPOSE 7860
 
-CMD ["python", "-m", "flotorch_crawl"]
+CMD ["python", "-m", "flocrawl"]

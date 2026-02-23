@@ -5,13 +5,13 @@ Fetches pages, extracts text, and discovers links using httpx + BeautifulSoup.
 """
 
 import logging
-from typing import List, Optional, Tuple
+from typing import List, Optional
 from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
 
-from flotorch_crawl.config import (
+from flocrawl.config import (
     get_max_links_per_page,
     get_max_scrape_size,
     get_request_timeout,
@@ -166,7 +166,7 @@ def scrape_links(
     Returns:
         Dict with keys: base_url, pages (list of {url, title, text}), errors.
     """
-    from flotorch_crawl.config import get_max_pages_to_scrape
+    from flocrawl.config import get_max_pages_to_scrape
 
     limit = max_pages if max_pages is not None else get_max_pages_to_scrape()
     link_result = list_links(url, same_domain_only=same_domain_only)
