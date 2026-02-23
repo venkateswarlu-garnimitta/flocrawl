@@ -49,17 +49,6 @@ Server runs at `http://0.0.0.0:8081` (or `PORT` from env, e.g. 7860 on Hugging F
 | `CRAWL_USER_AGENT` | Flocrawl/1.0 | User-Agent header |
 | `SEARCH_TIMEOUT` | 15 | Search request timeout (seconds) |
 
-## Agent System Prompt
-
-When integrating Flocrawl with an LLM agent, set the agent's system prompt using the recommended instructions so it uses tools correctly (especially `scrape_urls_tool` for multiple URLs instead of calling `scrape_url_tool` repeatedly):
-
-```python
-from flocrawl import get_agent_system_prompt
-
-system_prompt = get_agent_system_prompt()
-# Use system_prompt as your agent's system message
-```
-
 ## MCP Client Config
 
 ```json
