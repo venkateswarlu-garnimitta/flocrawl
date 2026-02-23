@@ -11,6 +11,7 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 
+import httpx
 from dotenv import load_dotenv
 
 from mcp.server.fastmcp import FastMCP
@@ -20,7 +21,13 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from flocrawl.scraper import list_links, scrape_links, scrape_url
+from flocrawl.config import get_request_timeout, get_user_agent
+from flocrawl.scraper import (
+    list_links_async,
+    scrape_links_async,
+    scrape_url_async,
+    scrape_urls_async,
+)
 from flocrawl.search import search_web
 
 logging.basicConfig(
@@ -31,13 +38,29 @@ logger = logging.getLogger(__name__)
 
 _executor = ThreadPoolExecutor(max_workers=4)
 
+
+async def _run_sync(fn, *args, **kwargs):
+    """Run sync blocking function in thread pool (used for search_web)."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, lambda: fn(*args, **kwargs))
+
+
+def _make_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        follow_redirects=True,
+        timeout=get_request_timeout(),
+        headers={"User-Agent": get_user_agent()},
+    )
+
+
 mcp = FastMCP(
     "Flocrawl",
     instructions=(
         "Flocrawl MCP Server: Web search, scraping, link discovery, "
         "and recursive crawling. Use search_web for web search, scrape_url for "
-        "single-page content, list_links to discover links, and scrape_links "
-        "to crawl and scrape multiple pages from a starting URL."
+        "single-page content, list_links to discover links, scrape_links to "
+        "crawl and scrape multiple pages from a starting URL, and scrape_urls "
+        "to scrape a list of URLs in parallel when you already have the links."
     ),
     json_response=True,
     streamable_http_path="/",
@@ -103,7 +126,8 @@ async def scrape_url_tool(url: str) -> str:
         JSON with url, title, text, and optional error.
     """
     try:
-        result = await _run_sync(scrape_url, url)
+        async with _make_client() as client:
+            result = await scrape_url_async(url, client)
         return json.dumps(result, indent=2)
     except Exception as e:
         logger.exception("scrape_url failed")
@@ -126,7 +150,8 @@ async def list_links_tool(url: str, same_domain_only: bool = True) -> str:
         JSON with url, links (list of {href, text}), and optional error.
     """
     try:
-        result = await _run_sync(list_links, url, same_domain_only)
+        async with _make_client() as client:
+            result = await list_links_async(url, same_domain_only, client)
         return json.dumps(result, indent=2)
     except Exception as e:
         logger.exception("list_links failed")
@@ -140,10 +165,11 @@ async def scrape_links_tool(
     max_pages: int = 20,
 ) -> str:
     """
-    Crawl a page: list its links, then scrape each linked page.
+    Crawl a page: list its links, then scrape each linked page in parallel.
 
     Combines list_links and scrape_url. Fetches the starting URL, discovers
-    links, then scrapes each link up to max_pages.
+    links, then scrapes all links concurrently (up to max_pages) for fast
+    response times.
 
     Args:
         url: Starting URL.
@@ -154,7 +180,7 @@ async def scrape_links_tool(
         JSON with base_url, pages (list of {url, title, text}), and errors.
     """
     try:
-        result = await _run_sync(scrape_links, url, same_domain_only, max_pages)
+        result = await scrape_links_async(url, same_domain_only, max_pages)
         return json.dumps(result, indent=2)
     except Exception as e:
         logger.exception("scrape_links failed")
@@ -163,6 +189,28 @@ async def scrape_links_tool(
             "pages": [],
             "errors": [str(e)],
         })
+
+
+@mcp.tool()
+async def scrape_urls_tool(urls: list[str]) -> str:
+    """
+    Scrape multiple URLs in parallel.
+
+    Use when you already have a list of URLs (e.g. from list_links) and want
+    to fetch all content in one fast call. Processes all URLs concurrently.
+
+    Args:
+        urls: List of full URLs to scrape (e.g. ["https://a.com/1", "https://a.com/2"]).
+
+    Returns:
+        JSON with pages (list of {url, title, text}) and errors.
+    """
+    try:
+        result = await scrape_urls_async(urls)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.exception("scrape_urls failed")
+        return json.dumps({"pages": [], "errors": [str(e)]})
 
 
 async def main() -> None:

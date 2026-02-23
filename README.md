@@ -32,7 +32,8 @@ Server runs at `http://0.0.0.0:8081` (or `PORT` from env, e.g. 7860 on Hugging F
 | `search_web_tool` | Web search; returns titles, URLs, snippets |
 | `scrape_url_tool` | Scrape a single URL; extract main text |
 | `list_links_tool` | List all links on a page |
-| `scrape_links_tool` | List links, then scrape each (crawl) |
+| `scrape_links_tool` | List links, then scrape each in parallel (crawl) |
+| `scrape_urls_tool` | Scrape a list of URLs in parallel |
 
 ## Configuration
 
@@ -43,6 +44,7 @@ Server runs at `http://0.0.0.0:8081` (or `PORT` from env, e.g. 7860 on Hugging F
 | `CRAWL_MAX_PAGE_SIZE` | 1048576 | Max bytes per page (1MB) |
 | `CRAWL_MAX_LINKS_PER_PAGE` | 100 | Max links to extract per page |
 | `CRAWL_MAX_PAGES` | 20 | Max pages for scrape_links |
+| `CRAWL_MAX_CONCURRENT` | 10 | Max concurrent HTTP requests when scraping links in parallel |
 | `CRAWL_REQUEST_TIMEOUT` | 30 | HTTP timeout (seconds) |
 | `CRAWL_USER_AGENT` | Flocrawl/1.0 | User-Agent header |
 | `SEARCH_TIMEOUT` | 15 | Search request timeout (seconds) |
