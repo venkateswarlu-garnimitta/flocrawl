@@ -27,11 +27,6 @@ def get_request_timeout() -> float:
     return float(os.getenv("CRAWL_REQUEST_TIMEOUT", "30"))
 
 
-def get_max_concurrent_requests() -> int:
-    """Max concurrent HTTP requests when scraping multiple links in parallel."""
-    return int(os.getenv("CRAWL_MAX_CONCURRENT", "10"))
-
-
 def get_user_agent() -> str:
     """User-Agent header for HTTP requests."""
     return os.getenv(

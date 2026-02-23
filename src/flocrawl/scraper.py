@@ -1,11 +1,9 @@
 """
 Web scraping module for Flocrawl.
 
-Async-only: fetches pages, extracts text, and discovers links using httpx
-+ BeautifulSoup. Parallel link scraping via asyncio for low latency.
+Fetches pages, extracts text, and discovers links using httpx + BeautifulSoup.
 """
 
-import asyncio
 import logging
 from typing import List, Optional
 from urllib.parse import urljoin, urlparse
@@ -14,9 +12,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from flocrawl.config import (
-    get_max_concurrent_requests,
     get_max_links_per_page,
-    get_max_pages_to_scrape,
     get_max_scrape_size,
     get_request_timeout,
     get_user_agent,
@@ -25,62 +21,101 @@ from flocrawl.config import (
 logger = logging.getLogger(__name__)
 
 
-def _extract_text_from_html(html: str, url: str, max_text: int = 50000) -> dict:
-    """Parse HTML and extract title + main text. Returns dict for scrape result."""
+def scrape_url(url: str) -> dict:
+    """
+    Fetch a URL and extract main text content.
+
+    Args:
+        url: Full URL to fetch.
+
+    Returns:
+        Dict with keys: url, title, text, error (if any).
+    """
+    headers = {"User-Agent": get_user_agent()}
+    timeout = get_request_timeout()
+    max_size = get_max_scrape_size()
+
+    try:
+        with httpx.Client(
+            follow_redirects=True,
+            timeout=timeout,
+            headers=headers,
+        ) as client:
+            resp = client.get(url)
+            resp.raise_for_status()
+            content = resp.content
+            if len(content) > max_size:
+                content = content[:max_size]
+            encoding = resp.charset_encoding or "utf-8"
+            try:
+                html = content.decode(encoding, errors="replace")
+            except Exception:
+                html = content.decode("utf-8", errors="replace")
+
+    except httpx.HTTPStatusError as e:
+        return {
+            "url": url,
+            "title": "",
+            "text": "",
+            "error": f"HTTP {e.response.status_code}",
+        }
+    except Exception as e:
+        return {
+            "url": url,
+            "title": "",
+            "text": "",
+            "error": str(e),
+        }
+
     try:
         soup = BeautifulSoup(html, "html.parser")
+        # Remove script, style, nav, footer
         for tag in soup(["script", "style", "nav", "footer", "aside"]):
             tag.decompose()
         title_tag = soup.find("title")
         title = title_tag.get_text(strip=True) if title_tag else ""
+        # Get main content or body
         main = soup.find("main") or soup.find("article") or soup.find("body")
         text = main.get_text(separator="\n", strip=True) if main else ""
         if not text:
             text = soup.get_text(separator="\n", strip=True)
+        # Collapse multiple newlines
         text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
-        return {"url": url, "title": title, "text": text[:max_text], "error": None}
+        return {"url": url, "title": title, "text": text[:50000], "error": None}
     except Exception as e:
         return {"url": url, "title": "", "text": "", "error": str(e)}
 
 
-async def scrape_url_async(url: str, client: httpx.AsyncClient) -> dict:
+def list_links(url: str, same_domain_only: bool = True) -> dict:
     """
-    Async: fetch a URL and extract main text content.
-    Uses shared client for connection pooling; intended for parallel use.
+    Fetch a URL and list all links found on the page.
+
+    Args:
+        url: Full URL to fetch.
+        same_domain_only: If True, only return links on the same domain.
+
+    Returns:
+        Dict with keys: url, links (list of {href, text}), error (if any).
     """
-    max_size = get_max_scrape_size()
-    try:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        content = resp.content
-        if len(content) > max_size:
-            content = content[:max_size]
-        encoding = resp.charset_encoding or "utf-8"
-        try:
-            html = content.decode(encoding, errors="replace")
-        except Exception:
-            html = content.decode("utf-8", errors="replace")
-    except httpx.HTTPStatusError as e:
-        return {"url": url, "title": "", "text": "", "error": f"HTTP {e.response.status_code}"}
-    except Exception as e:
-        return {"url": url, "title": "", "text": "", "error": str(e)}
-    return _extract_text_from_html(html, url)
-
-
-async def list_links_async(
-    url: str, same_domain_only: bool, client: httpx.AsyncClient
-) -> dict:
-    """Async: fetch URL and list all links on the page."""
+    headers = {"User-Agent": get_user_agent()}
+    timeout = get_request_timeout()
     max_links = get_max_links_per_page()
+
     try:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        content = resp.content
-        encoding = resp.charset_encoding or "utf-8"
-        try:
-            html = content.decode(encoding, errors="replace")
-        except Exception:
-            html = content.decode("utf-8", errors="replace")
+        with httpx.Client(
+            follow_redirects=True,
+            timeout=timeout,
+            headers=headers,
+        ) as client:
+            resp = client.get(url)
+            resp.raise_for_status()
+            content = resp.content
+            encoding = resp.charset_encoding or "utf-8"
+            try:
+                html = content.decode(encoding, errors="replace")
+            except Exception:
+                html = content.decode("utf-8", errors="replace")
+
     except httpx.HTTPStatusError as e:
         return {"url": url, "links": [], "error": f"HTTP {e.response.status_code}"}
     except Exception as e:
@@ -89,8 +124,9 @@ async def list_links_async(
     try:
         soup = BeautifulSoup(html, "html.parser")
         base_domain = urlparse(url).netloc
-        seen: set[str] = set()
+        seen = set()
         links: List[dict] = []
+
         for a in soup.find_all("a", href=True):
             if len(links) >= max_links:
                 break
@@ -108,108 +144,57 @@ async def list_links_async(
             seen.add(abs_url)
             text = a.get_text(strip=True) or abs_url
             links.append({"href": abs_url, "text": text[:200]})
+
         return {"url": url, "links": links, "error": None}
     except Exception as e:
         return {"url": url, "links": [], "error": str(e)}
 
 
-async def scrape_links_async(
+def scrape_links(
     url: str,
     same_domain_only: bool = True,
     max_pages: Optional[int] = None,
 ) -> dict:
     """
-    Async: list links on a page, then scrape all links in parallel.
+    List links on a page, then scrape each link (recursive crawl).
 
-    Uses asyncio.gather with a semaphore to limit concurrency. Returns as soon
-    as all scrapes complete for minimal response latency.
+    Args:
+        url: Starting URL.
+        same_domain_only: Only follow links on the same domain.
+        max_pages: Maximum number of pages to scrape (default from config).
+
+    Returns:
+        Dict with keys: base_url, pages (list of {url, title, text}), errors.
     """
+    from flocrawl.config import get_max_pages_to_scrape
+
     limit = max_pages if max_pages is not None else get_max_pages_to_scrape()
-    concurrency = get_max_concurrent_requests()
-    headers = {"User-Agent": get_user_agent()}
-    timeout = get_request_timeout()
-    sem = asyncio.Semaphore(concurrency)
+    link_result = list_links(url, same_domain_only=same_domain_only)
+    if link_result.get("error"):
+        return {
+            "base_url": url,
+            "pages": [],
+            "errors": [link_result["error"]],
+        }
 
-    async def scrape_one(href: str, client: httpx.AsyncClient) -> dict:
-        async with sem:
-            return await scrape_url_async(href, client)
-
-    async with httpx.AsyncClient(
-        follow_redirects=True, timeout=timeout, headers=headers
-    ) as client:
-        link_result = await list_links_async(url, same_domain_only, client)
-        if link_result.get("error"):
-            return {
-                "base_url": url,
-                "pages": [],
-                "errors": [link_result["error"]],
-            }
-
-        to_scrape = [item["href"] for item in link_result["links"][:limit]]
-        if not to_scrape:
-            return {"base_url": url, "pages": [], "errors": []}
-
-        results = await asyncio.gather(
-            *[scrape_one(href, client) for href in to_scrape],
-            return_exceptions=True,
-        )
-
+    links = link_result["links"][:limit]
     pages: List[dict] = []
     errors: List[str] = []
-    for href, result in zip(to_scrape, results):
-        if isinstance(result, Exception):
-            errors.append(f"{href}: {result}")
-            continue
-        if result.get("error"):
-            errors.append(f"{href}: {result['error']}")
+
+    for item in links:
+        href = item["href"]
+        scraped = scrape_url(href)
+        if scraped.get("error"):
+            errors.append(f"{href}: {scraped['error']}")
         else:
             pages.append({
-                "url": result["url"],
-                "title": result["title"],
-                "text": result["text"],
+                "url": scraped["url"],
+                "title": scraped["title"],
+                "text": scraped["text"],
             })
-    return {"base_url": url, "pages": pages, "errors": errors}
 
-
-async def scrape_urls_async(urls: List[str]) -> dict:
-    """
-    Async: scrape multiple URLs in parallel.
-
-    Use when the agent already has a list of links (e.g. from list_links) and
-    wants to fetch all content in one fast call.
-    """
-    if not urls:
-        return {"pages": [], "errors": []}
-
-    concurrency = get_max_concurrent_requests()
-    headers = {"User-Agent": get_user_agent()}
-    timeout = get_request_timeout()
-    sem = asyncio.Semaphore(concurrency)
-
-    async def scrape_one(u: str, client: httpx.AsyncClient) -> dict:
-        async with sem:
-            return await scrape_url_async(u, client)
-
-    async with httpx.AsyncClient(
-        follow_redirects=True, timeout=timeout, headers=headers
-    ) as client:
-        results = await asyncio.gather(
-            *[scrape_one(u, client) for u in urls],
-            return_exceptions=True,
-        )
-
-    pages: List[dict] = []
-    errors: List[str] = []
-    for url, result in zip(urls, results):
-        if isinstance(result, Exception):
-            errors.append(f"{url}: {result}")
-            continue
-        if result.get("error"):
-            errors.append(f"{url}: {result['error']}")
-        else:
-            pages.append({
-                "url": result["url"],
-                "title": result["title"],
-                "text": result["text"],
-            })
-    return {"pages": pages, "errors": errors}
+    return {
+        "base_url": url,
+        "pages": pages,
+        "errors": errors if errors else [],
+    }

@@ -11,7 +11,6 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 
-import httpx
 from dotenv import load_dotenv
 
 from mcp.server.fastmcp import FastMCP
@@ -21,13 +20,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from flocrawl.config import get_request_timeout, get_user_agent
-from flocrawl.scraper import (
-    list_links_async,
-    scrape_links_async,
-    scrape_url_async,
-    scrape_urls_async,
-)
+from flocrawl.scraper import list_links, scrape_links, scrape_url
 from flocrawl.search import search_web
 
 logging.basicConfig(
@@ -40,29 +33,18 @@ _executor = ThreadPoolExecutor(max_workers=4)
 
 
 async def _run_sync(fn, *args, **kwargs):
-    """Run sync blocking function in thread pool (used for search_web)."""
+    """Run sync blocking function in thread pool."""
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_executor, lambda: fn(*args, **kwargs))
-
-
-def _make_client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(
-        follow_redirects=True,
-        timeout=get_request_timeout(),
-        headers={"User-Agent": get_user_agent()},
-    )
 
 
 mcp = FastMCP(
     "Flocrawl",
     instructions=(
-        "CRITICAL TOOL USAGE RULES - FOLLOW EXACTLY:\n"
-        "- If you need to scrape 1 URL: use scrape_url_tool(url='...')\n"
-        "- If you need to scrape 2+ URLs: use scrape_urls_tool(urls=[url1, url2, ...]) ONCE\n"
-        "- NEVER call scrape_url_tool multiple times for different URLs\n"
-        "- After search_web_tool, extract URLs and use scrape_urls_tool\n"
-        "- After list_links_tool, extract hrefs and use scrape_urls_tool\n"
-        "- scrape_urls_tool accepts list[str] or JSON string '[\"url1\",\"url2\"]'"
+        "Flocrawl MCP Server: Web search, scraping, link discovery, "
+        "and recursive crawling. Use search_web for web search, scrape_url for "
+        "single-page content, list_links to discover links, and scrape_links "
+        "to crawl and scrape multiple pages from a starting URL."
     ),
     json_response=True,
     streamable_http_path="/",
@@ -90,8 +72,7 @@ async def search_web_tool(
     """
     Perform a web search and return results with titles, URLs, and snippets.
 
-    CRITICAL: After this tool returns URLs, use scrape_urls_tool(urls=[url1, url2, ...])
-    with ALL URLs in one call. DO NOT call scrape_url_tool multiple times!
+    Uses DuckDuckGo. No API keys required.
 
     Args:
         query: Search query string.
@@ -112,11 +93,9 @@ async def search_web_tool(
 @mcp.tool()
 async def scrape_url_tool(url: str) -> str:
     """
-    Scrape EXACTLY ONE URL and extract main text content.
+    Scrape a single URL and extract main text content.
 
-    WARNING: Only use this for a single URL. If you have multiple URLs,
-    use scrape_urls_tool(urls=[url1, url2, ...]) instead. DO NOT call this
-    tool multiple times with different URLs!
+    Fetches the page, removes scripts/styles, and returns cleaned text.
 
     Args:
         url: Full URL to scrape (e.g. https://example.com/page).
@@ -125,8 +104,7 @@ async def scrape_url_tool(url: str) -> str:
         JSON with url, title, text, and optional error.
     """
     try:
-        async with _make_client() as client:
-            result = await scrape_url_async(url, client)
+        result = await _run_sync(scrape_url, url)
         return json.dumps(result, indent=2)
     except Exception as e:
         logger.exception("scrape_url failed")
@@ -138,8 +116,8 @@ async def list_links_tool(url: str, same_domain_only: bool = True) -> str:
     """
     List all links found on a webpage.
 
-    CRITICAL: After this tool returns hrefs, use scrape_urls_tool(urls=[href1, href2, ...])
-    with ALL hrefs in one call. DO NOT call scrape_url_tool multiple times!
+    Fetches the URL and extracts anchor tags with href. Optionally filters
+    to links on the same domain only.
 
     Args:
         url: Full URL to fetch and analyze.
@@ -149,8 +127,7 @@ async def list_links_tool(url: str, same_domain_only: bool = True) -> str:
         JSON with url, links (list of {href, text}), and optional error.
     """
     try:
-        async with _make_client() as client:
-            result = await list_links_async(url, same_domain_only, client)
+        result = await _run_sync(list_links, url, same_domain_only)
         return json.dumps(result, indent=2)
     except Exception as e:
         logger.exception("list_links failed")
@@ -164,11 +141,10 @@ async def scrape_links_tool(
     max_pages: int = 20,
 ) -> str:
     """
-    Crawl a page: list its links, then scrape each linked page in parallel.
+    Crawl a page: list its links, then scrape each link.
 
     Combines list_links and scrape_url. Fetches the starting URL, discovers
-    links, then scrapes all links concurrently (up to max_pages) for fast
-    response times.
+    links, then scrapes each link up to max_pages.
 
     Args:
         url: Starting URL.
@@ -179,7 +155,7 @@ async def scrape_links_tool(
         JSON with base_url, pages (list of {url, title, text}), and errors.
     """
     try:
-        result = await scrape_links_async(url, same_domain_only, max_pages)
+        result = await _run_sync(scrape_links, url, same_domain_only, max_pages)
         return json.dumps(result, indent=2)
     except Exception as e:
         logger.exception("scrape_links failed")
@@ -188,50 +164,6 @@ async def scrape_links_tool(
             "pages": [],
             "errors": [str(e)],
         })
-
-
-def _normalize_urls_input(urls) -> list[str]:
-    """Accept urls as list[str] or JSON string; return list[str]."""
-    if isinstance(urls, list):
-        return [str(u).strip() for u in urls if u]
-    if isinstance(urls, str):
-        trimmed = urls.strip()
-        if not trimmed:
-            return []
-        if trimmed.startswith("["):
-            try:
-                parsed = json.loads(trimmed)
-                return [str(u).strip() for u in parsed if u] if isinstance(parsed, list) else [trimmed]
-            except json.JSONDecodeError:
-                return [trimmed]
-        return [trimmed]
-    return []
-
-
-@mcp.tool()
-async def scrape_urls_tool(urls: list[str] | str) -> str:
-    """
-    Scrape MULTIPLE URLs in parallel. REQUIRED for 2+ URLs.
-
-    This is the CORRECT tool to use when you have multiple URLs from search results
-    or link listings. Pass ALL URLs in one call: urls=["url1", "url2", ...]
-    or as JSON string: urls='["url1","url2"]'
-
-    Args:
-        urls: List of URLs or JSON array string (e.g. ["https://a.com/1", "https://a.com/2"]).
-
-    Returns:
-        JSON with pages (list of {url, title, text}) and errors.
-    """
-    try:
-        url_list = _normalize_urls_input(urls)
-        if not url_list:
-            return json.dumps({"pages": [], "errors": ["No valid URLs provided"]}, indent=2)
-        result = await scrape_urls_async(url_list)
-        return json.dumps(result, indent=2)
-    except Exception as e:
-        logger.exception("scrape_urls failed")
-        return json.dumps({"pages": [], "errors": [str(e)]})
 
 
 async def main() -> None:
