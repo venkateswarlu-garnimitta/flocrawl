@@ -56,14 +56,9 @@ def _make_client() -> httpx.AsyncClient:
 mcp = FastMCP(
     "Flocrawl",
     instructions=(
-        "Flocrawl MCP Server: Web search, scraping, link discovery, "
-        "and recursive crawling. "
-        "CRITICAL: When scraping multiple URLs (e.g. from search results or a list "
-        "of links), ALWAYS use scrape_urls_tool with a list of URLs. Never call "
-        "scrape_url_tool repeatedly for each URL—this is slow and wasteful. "
-        "Use scrape_url_tool only for a single URL. Use scrape_urls_tool for 2+ URLs. "
-        "Tools: search_web, scrape_url (single only), list_links, scrape_links "
-        "(crawl from one URL), scrape_urls (batch scrape a list of URLs)."
+        "Flocrawl MCP Server. TOOL USAGE: For 2+ URLs to scrape, call scrape_urls_tool(urls=[...]) "
+        "once with all URLs. NEVER call scrape_url_tool repeatedly. scrape_url_tool is for ONE URL only. "
+        "Tools: search_web, scrape_url (1 URL), scrape_urls (2+ URLs, pass list), list_links, scrape_links."
     ),
     json_response=True,
     streamable_http_path="/",
@@ -191,23 +186,42 @@ async def scrape_links_tool(
         })
 
 
-@mcp.tool()
-async def scrape_urls_tool(urls: list[str]) -> str:
-    """
-    Scrape multiple URLs in parallel. PREFERRED for 2+ URLs.
+def _normalize_urls_input(urls) -> list[str]:
+    """Accept urls as list[str] or JSON string; return list[str]."""
+    if isinstance(urls, list):
+        return [str(u).strip() for u in urls if u]
+    if isinstance(urls, str):
+        trimmed = urls.strip()
+        if not trimmed:
+            return []
+        if trimmed.startswith("["):
+            try:
+                parsed = json.loads(trimmed)
+                return [str(u).strip() for u in parsed if u] if isinstance(parsed, list) else [trimmed]
+            except json.JSONDecodeError:
+                return [trimmed]
+        return [trimmed]
+    return []
 
-    ALWAYS use this when you have multiple URLs to scrape (e.g. from
-    search_web results, list_links output, or any list). Pass all URLs
-    in one call—do not call scrape_url_tool repeatedly. Much faster.
+
+@mcp.tool()
+async def scrape_urls_tool(urls: list[str] | str) -> str:
+    """
+    Scrape multiple URLs in parallel. Use for 2+ URLs—never call scrape_url_tool repeatedly.
+
+    Pass all URLs in one call. urls can be a list or JSON string like '["url1","url2"]'.
 
     Args:
-        urls: List of full URLs (e.g. ["https://a.com/1", "https://a.com/2"]).
+        urls: List of URLs or JSON array string (e.g. ["https://a.com/1", "https://a.com/2"]).
 
     Returns:
         JSON with pages (list of {url, title, text}) and errors.
     """
     try:
-        result = await scrape_urls_async(urls)
+        url_list = _normalize_urls_input(urls)
+        if not url_list:
+            return json.dumps({"pages": [], "errors": ["No valid URLs provided"]}, indent=2)
+        result = await scrape_urls_async(url_list)
         return json.dumps(result, indent=2)
     except Exception as e:
         logger.exception("scrape_urls failed")
