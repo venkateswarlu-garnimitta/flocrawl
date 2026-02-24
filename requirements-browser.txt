@@ -1,0 +1,3 @@
+# Install after requirements.txt to enable scraping of JavaScript-rendered pages (e.g. Google Docs)
+# Then run: playwright install chromium
+playwright>=1.40.0

@@ -33,3 +33,13 @@ def get_user_agent() -> str:
         "CRAWL_USER_AGENT",
         "Mozilla/5.0 (compatible; Flocrawl/1.0; +https://flotorch.ai)",
     )
+
+
+def get_use_browser_fallback() -> bool:
+    """Use headless browser (Playwright) when response indicates JS-only content."""
+    return os.getenv("CRAWL_USE_BROWSER_FALLBACK", "true").lower() in ("1", "true", "yes")
+
+
+def get_browser_wait_after_load_ms() -> int:
+    """Milliseconds to wait after page load for JS-rendered content (e.g. Google Docs)."""
+    return int(os.getenv("CRAWL_BROWSER_WAIT_MS", "3000"))

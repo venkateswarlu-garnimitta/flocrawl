@@ -25,6 +25,19 @@ python -m flocrawl
 
 Server runs at `http://0.0.0.0:8081` (or `PORT` from env, e.g. 7860 on Hugging Face).
 
+### JavaScript-rendered pages (e.g. Google Docs)
+
+Sites that require JavaScript (like Google Docs) return a “enable JavaScript” page when fetched with plain HTTP. To scrape them, install the optional browser backend and install Chromium:
+
+```bash
+pip install -e ".[browser]"
+playwright install chromium
+```
+
+With this installed, the server will automatically use a headless browser when it detects a JS-required response, so Google Docs and similar pages can be scraped.
+
+For Docker, add to your image: install `requirements-browser.txt` and run `playwright install chromium` (and install system deps for Chromium if using a slim image).
+
 ## Tools
 
 | Tool | Description |
@@ -45,6 +58,8 @@ Server runs at `http://0.0.0.0:8081` (or `PORT` from env, e.g. 7860 on Hugging F
 | `CRAWL_MAX_PAGES` | 20 | Max pages for scrape_links |
 | `CRAWL_REQUEST_TIMEOUT` | 30 | HTTP timeout (seconds) |
 | `CRAWL_USER_AGENT` | Flocrawl/1.0 | User-Agent header |
+| `CRAWL_USE_BROWSER_FALLBACK` | true | Use Playwright when page requires JavaScript (e.g. Google Docs) |
+| `CRAWL_BROWSER_WAIT_MS` | 3000 | Ms to wait after load for JS-rendered content |
 | `SEARCH_TIMEOUT` | 20 | Search request timeout (seconds) |
 | `SEARCH_BACKEND_DELAY` | 1.0 | Delay between backend attempts (reduces rate limiting) |
 | `SEARCH_RATE_LIMIT_DELAY` | 3.0 | Extra delay after 429 (seconds) |
@@ -111,6 +126,7 @@ flocrawl/
 
 - Python 3.11+
 - httpx, beautifulsoup4, ddgs, fastmcp
+- Optional: `playwright` (install with `pip install flocrawl[browser]` and run `playwright install chromium`) for JavaScript-heavy sites like Google Docs
 
 ## License
 

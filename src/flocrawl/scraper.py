@@ -2,23 +2,103 @@
 Web scraping module for Flocrawl.
 
 Fetches pages, extracts text, and discovers links using httpx + BeautifulSoup.
+When a page requires JavaScript (e.g. Google Docs), optionally falls back to
+a headless browser (Playwright) if installed.
 """
 
 import logging
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
 
 from flocrawl.config import (
+    get_browser_wait_after_load_ms,
     get_max_links_per_page,
     get_max_scrape_size,
     get_request_timeout,
     get_user_agent,
+    get_use_browser_fallback,
 )
 
 logger = logging.getLogger(__name__)
+
+# Lazy: Playwright only imported when browser fallback is used
+_playwright_available: Optional[bool] = None
+
+
+def _playwright_installed() -> bool:
+    global _playwright_available
+    if _playwright_available is None:
+        try:
+            from playwright.sync_api import sync_playwright  # noqa: F401
+            _playwright_available = True
+        except ImportError:
+            _playwright_available = False
+    return _playwright_available
+
+
+# Phrases that indicate the server returned a "please enable JavaScript" page
+_JS_REQUIRED_PHRASES = (
+    "javascript is not enabled",
+    "javascript is not supported",
+    "enable javascript",
+    "please enable javascript",
+    "browser version is not supported",
+    "browser is not supported",
+    "turn on javascript",
+    "you need to enable javascript",
+)
+
+# Domains that typically require JS for main content (try browser first or after minimal content)
+_JS_HEAVY_DOMAINS = ("docs.google.com", "drive.google.com", "notion.so", "notion.site")
+
+
+def _is_js_required_page(html: str, url: str, extracted_text: str) -> bool:
+    """Return True if the response looks like a JS-required placeholder page."""
+    lower = html.lower()
+    if any(phrase in lower for phrase in _JS_REQUIRED_PHRASES):
+        return True
+    # Very little text from a known JS-heavy host
+    if len(extracted_text.strip()) < 400 and any(d in url for d in _JS_HEAVY_DOMAINS):
+        return True
+    return False
+
+
+def _fetch_html_with_browser(url: str) -> Optional[str]:
+    """
+    Fetch URL with a headless browser (Playwright). Returns HTML or None on failure.
+    Requires: pip install flocrawl[browser] && playwright install chromium
+    """
+    if not _playwright_installed():
+        logger.debug("Playwright not installed; cannot use browser fallback.")
+        return None
+    if not get_use_browser_fallback():
+        return None
+    timeout_ms = int(get_request_timeout() * 1000)
+    wait_ms = get_browser_wait_after_load_ms()
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                context = browser.new_context(
+                    user_agent=get_user_agent(),
+                    viewport={"width": 1280, "height": 720},
+                    ignore_https_errors=True,
+                )
+                page = context.new_page()
+                page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                page.wait_for_timeout(wait_ms)
+                html = page.content()
+                context.close()
+                return html
+            finally:
+                browser.close()
+    except Exception as e:
+        logger.warning("Browser fetch failed for %s: %s", url, e)
+        return None
 
 
 def scrape_url(url: str) -> dict:
@@ -68,22 +148,31 @@ def scrape_url(url: str) -> dict:
         }
 
     try:
-        soup = BeautifulSoup(html, "html.parser")
-        # Remove script, style, nav, footer
-        for tag in soup(["script", "style", "nav", "footer", "aside"]):
-            tag.decompose()
-        title_tag = soup.find("title")
-        title = title_tag.get_text(strip=True) if title_tag else ""
-        # Get main content or body
-        main = soup.find("main") or soup.find("article") or soup.find("body")
-        text = main.get_text(separator="\n", strip=True) if main else ""
-        if not text:
-            text = soup.get_text(separator="\n", strip=True)
-        # Collapse multiple newlines
+        soup, title, text = _parse_html_to_text(html)
+        # If response looks like "enable JavaScript" (e.g. Google Docs), try browser
+        if get_use_browser_fallback() and _is_js_required_page(html, url, text):
+            browser_html = _fetch_html_with_browser(url)
+            if browser_html:
+                soup, title, text = _parse_html_to_text(browser_html)
+                logger.info("Scraped %s using browser fallback (JS-rendered content).", url)
         text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
         return {"url": url, "title": title, "text": text[:50000], "error": None}
     except Exception as e:
         return {"url": url, "title": "", "text": "", "error": str(e)}
+
+
+def _parse_html_to_text(html: str) -> Tuple[BeautifulSoup, str, str]:
+    """Parse HTML with BeautifulSoup; return soup, title, and main text."""
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "nav", "footer", "aside"]):
+        tag.decompose()
+    title_tag = soup.find("title")
+    title = title_tag.get_text(strip=True) if title_tag else ""
+    main = soup.find("main") or soup.find("article") or soup.find("body")
+    text = main.get_text(separator="\n", strip=True) if main else ""
+    if not text:
+        text = soup.get_text(separator="\n", strip=True)
+    return soup, title, text
 
 
 def list_links(url: str, same_domain_only: bool = True) -> dict:
@@ -123,6 +212,15 @@ def list_links(url: str, same_domain_only: bool = True) -> dict:
 
     try:
         soup = BeautifulSoup(html, "html.parser")
+        # If page looks like "enable JavaScript" (e.g. Google Docs), try browser
+        if get_use_browser_fallback():
+            placeholder_text = soup.get_text(separator=" ", strip=True)[:500]
+            if _is_js_required_page(html, url, placeholder_text):
+                browser_html = _fetch_html_with_browser(url)
+                if browser_html:
+                    soup = BeautifulSoup(browser_html, "html.parser")
+                    logger.info("Listed links for %s using browser fallback.", url)
+
         base_domain = urlparse(url).netloc
         seen = set()
         links: List[dict] = []
