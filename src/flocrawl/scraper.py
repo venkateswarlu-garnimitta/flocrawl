@@ -66,6 +66,50 @@ def _is_js_required_page(html: str, url: str, extracted_text: str) -> bool:
     return False
 
 
+def _try_google_docs_export(url: str) -> Optional[str]:
+    """
+    For Google Docs URLs, try the export endpoint first (no JS required).
+    Returns plain text content or None if not a Google Doc or export fails.
+    """
+    import re
+    # Match Google Docs URLs: docs.google.com/document/d/{ID}/...
+    match = re.search(r'docs\.google\.com/document/d/([a-zA-Z0-9_-]+)', url)
+    if not match:
+        return None
+
+    doc_id = match.group(1)
+    export_url = f"https://docs.google.com/document/d/{doc_id}/export?format=txt"
+
+    try:
+        with httpx.Client(
+            follow_redirects=True,
+            timeout=get_request_timeout(),
+            headers={"User-Agent": get_user_agent()},
+        ) as client:
+            resp = client.get(export_url)
+            resp.raise_for_status()
+            content = resp.content
+            if len(content) > get_max_scrape_size():
+                content = content[:get_max_scrape_size()]
+            # Try to decode as UTF-8, fallback to latin-1 for Google Docs
+            try:
+                text = content.decode("utf-8")
+            except UnicodeDecodeError:
+                text = content.decode("latin-1", errors="replace")
+
+            # Google Docs export might return HTML error page if private/not accessible
+            if len(text.strip()) < 50 and ("404" in text or "not found" in text.lower() or "access" in text.lower()):
+                return None
+
+            if text.strip():  # Only return if we got actual content
+                logger.info("Retrieved Google Doc content via export URL.")
+                return text
+    except Exception as e:
+        logger.debug("Google Docs export failed for %s: %s", url, e)
+
+    return None
+
+
 def _fetch_html_with_browser(url: str) -> Optional[str]:
     """
     Fetch URL with a headless browser (Playwright). Returns HTML or None on failure.
@@ -78,19 +122,47 @@ def _fetch_html_with_browser(url: str) -> Optional[str]:
         return None
     timeout_ms = int(get_request_timeout() * 1000)
     wait_ms = get_browser_wait_after_load_ms()
+
+    # Use modern Chrome user agent for better compatibility
+    chrome_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            # Launch with args to reduce automation detection
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-web-security",
+                    "--disable-features=VizDisplayCompositor",
+                ],
+            )
             try:
                 context = browser.new_context(
-                    user_agent=get_user_agent(),
-                    viewport={"width": 1280, "height": 720},
+                    user_agent=chrome_ua,
+                    viewport={"width": 1920, "height": 1080},
                     ignore_https_errors=True,
+                    # Add more realistic browser context
+                    locale="en-US",
+                    timezone_id="America/New_York",
                 )
                 page = context.new_page()
+
+                # Navigate and wait for content
                 page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-                page.wait_for_timeout(wait_ms)
+
+                # For Google Docs, wait longer and try to detect when content is loaded
+                if "docs.google.com" in url:
+                    # Wait for the document body to appear (Google Docs specific)
+                    try:
+                        page.wait_for_selector(".kix-appview-editor", timeout=10000)
+                    except:
+                        pass  # Continue even if selector not found
+                    page.wait_for_timeout(max(wait_ms, 5000))  # At least 5s for Google Docs
+                else:
+                    page.wait_for_timeout(wait_ms)
+
                 html = page.content()
                 context.close()
                 return html
@@ -111,6 +183,19 @@ def scrape_url(url: str) -> dict:
     Returns:
         Dict with keys: url, title, text, error (if any).
     """
+    # Special handling for Google Docs: try export URL first (no JS needed)
+    export_text = _try_google_docs_export(url)
+    if export_text:
+        # For export URLs, we get plain text directly
+        lines = [line.strip() for line in export_text.splitlines() if line.strip()]
+        title = "Google Document"  # Default title for exported docs
+        # Try to extract title from first line if it's a heading
+        if lines and len(lines[0]) < 100:
+            title = lines[0]
+        text = "\n".join(lines)
+        return {"url": url, "title": title, "text": text[:50000], "error": None}
+
+    # Normal scraping flow
     headers = {"User-Agent": get_user_agent()}
     timeout = get_request_timeout()
     max_size = get_max_scrape_size()
