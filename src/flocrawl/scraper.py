@@ -66,19 +66,32 @@ def _is_js_required_page(html: str, url: str, extracted_text: str) -> bool:
     return False
 
 
-def _try_google_docs_export(url: str) -> Optional[str]:
+def _try_google_export(url: str) -> Optional[str]:
     """
-    For Google Docs URLs, try the export endpoint first (no JS required).
-    Returns plain text content or None if not a Google Doc or export fails.
+    For Google Docs/Sheets URLs, try the export endpoint first (no JS required).
+    Supports: documents (txt format) and spreadsheets (tsv format).
+    Returns plain text content or None if not supported or export fails.
     """
     import re
-    # Match Google Docs URLs: docs.google.com/document/d/{ID}/...
-    match = re.search(r'docs\.google\.com/document/d/([a-zA-Z0-9_-]+)', url)
-    if not match:
-        return None
 
-    doc_id = match.group(1)
-    export_url = f"https://docs.google.com/document/d/{doc_id}/export?format=txt"
+    # Match Google Docs URLs: docs.google.com/document/d/{ID}/...
+    doc_match = re.search(r'docs\.google\.com/document/d/([a-zA-Z0-9_-]+)', url)
+    if doc_match:
+        doc_id = doc_match.group(1)
+        export_url = f"https://docs.google.com/document/d/{doc_id}/export?format=txt"
+        content_type = "Google Document"
+        logger_prefix = "Google Doc"
+    else:
+        # Match Google Sheets URLs: docs.google.com/spreadsheets/d/{ID}/...
+        sheet_match = re.search(r'docs\.google\.com/spreadsheets/d/([a-zA-Z0-9_-]+)', url)
+        if sheet_match:
+            sheet_id = sheet_match.group(1)
+            # For sheets, try TSV format first (tab-separated, preserves structure better than CSV)
+            export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=tsv"
+            content_type = "Google Spreadsheet"
+            logger_prefix = "Google Sheet"
+        else:
+            return None
 
     try:
         with httpx.Client(
@@ -91,21 +104,26 @@ def _try_google_docs_export(url: str) -> Optional[str]:
             content = resp.content
             if len(content) > get_max_scrape_size():
                 content = content[:get_max_scrape_size()]
-            # Try to decode as UTF-8, fallback to latin-1 for Google Docs
+
+            # Try to decode content - Google exports can be UTF-8 or latin-1
             try:
                 text = content.decode("utf-8")
             except UnicodeDecodeError:
                 text = content.decode("latin-1", errors="replace")
 
-            # Google Docs export might return HTML error page if private/not accessible
-            if len(text.strip()) < 50 and ("404" in text or "not found" in text.lower() or "access" in text.lower()):
+            # Check if we got an error page instead of content
+            if len(text.strip()) < 50 and any(phrase in text.lower() for phrase in ["404", "not found", "access", "private", "permission"]):
                 return None
 
             if text.strip():  # Only return if we got actual content
-                logger.info("Retrieved Google Doc content via export URL.")
+                logger.info("Retrieved %s content via export URL.", logger_prefix)
+                # For sheets, add a header to indicate it's tabular data
+                if content_type == "Google Spreadsheet":
+                    text = f"Google Spreadsheet (Tab-separated values):\n\n{text}"
+                return text
                 return text
     except Exception as e:
-        logger.debug("Google Docs export failed for %s: %s", url, e)
+        logger.debug("%s export failed for %s: %s", logger_prefix, url, e)
 
     return None
 
@@ -183,15 +201,17 @@ def scrape_url(url: str) -> dict:
     Returns:
         Dict with keys: url, title, text, error (if any).
     """
-    # Special handling for Google Docs: try export URL first (no JS needed)
-    export_text = _try_google_docs_export(url)
+    # Special handling for Google Docs/Sheets: try export URL first (no JS needed)
+    export_text = _try_google_export(url)
     if export_text:
         # For export URLs, we get plain text directly
         lines = [line.strip() for line in export_text.splitlines() if line.strip()]
-        title = "Google Document"  # Default title for exported docs
-        # Try to extract title from first line if it's a heading
-        if lines and len(lines[0]) < 100:
+        title = "Google Document"  # Default title for exported content
+        # Try to extract title from first line if it's a heading (skip the type indicator for sheets)
+        if lines and len(lines[0]) < 100 and not lines[0].startswith("Google Spreadsheet"):
             title = lines[0]
+        elif lines and lines[0].startswith("Google Spreadsheet"):
+            title = "Google Spreadsheet"
         text = "\n".join(lines)
         return {"url": url, "title": title, "text": text[:50000], "error": None}
 

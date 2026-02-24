@@ -29,7 +29,7 @@ Server runs at `http://0.0.0.0:8081` (or `PORT` from env, e.g. 7860 on Hugging F
 
 Sites that require JavaScript (like Google Docs) return a “enable JavaScript” page when fetched with plain HTTP. Flocrawl handles this in two ways:
 
-1. **Google Docs Export URLs**: For `docs.google.com/document/d/...` URLs, Flocrawl automatically tries the plain text export endpoint first (`/export?format=txt`), which works for public documents without requiring JavaScript.
+1. **Google Docs/Sheets Export URLs**: For `docs.google.com/document/d/...` and `docs.google.com/spreadsheets/d/...` URLs, Flocrawl automatically tries the plain text export endpoint first (`/export?format=txt` for docs, `/export?format=tsv` for sheets), which works for public documents and spreadsheets without requiring JavaScript.
 
 2. **Headless Browser Fallback**: For other JS-heavy sites or when export URLs don't work, install the optional browser backend:
 
