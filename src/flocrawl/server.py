@@ -67,7 +67,7 @@ async def discovery(_request: Request) -> JSONResponse:
 async def search_web_tool(
     query: str,
     max_results: int = 10,
-    region: str = "wt-wt",
+    region: str = "us-en",
 ) -> str:
     """
     Perform a web search and return results with titles, URLs, and snippets.

@@ -45,7 +45,9 @@ Server runs at `http://0.0.0.0:8081` (or `PORT` from env, e.g. 7860 on Hugging F
 | `CRAWL_MAX_PAGES` | 20 | Max pages for scrape_links |
 | `CRAWL_REQUEST_TIMEOUT` | 30 | HTTP timeout (seconds) |
 | `CRAWL_USER_AGENT` | Flocrawl/1.0 | User-Agent header |
-| `SEARCH_TIMEOUT` | 15 | Search request timeout (seconds) |
+| `SEARCH_TIMEOUT` | 20 | Search request timeout (seconds) |
+| `SEARCH_BACKEND_DELAY` | 1.0 | Delay between backend attempts (reduces rate limiting) |
+| `SEARCH_RATE_LIMIT_DELAY` | 3.0 | Extra delay after 429 (seconds) |
 
 ## MCP Client Configuration
 
