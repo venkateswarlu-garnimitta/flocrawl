@@ -47,7 +47,7 @@ Server runs at `http://0.0.0.0:8081` (or `PORT` from env, e.g. 7860 on Hugging F
 | `CRAWL_USER_AGENT` | Flocrawl/1.0 | User-Agent header |
 | `SEARCH_TIMEOUT` | 15 | Search request timeout (seconds) |
 
-## MCP Client Config
+## MCP Client Configuration
 
 ```json
 {
@@ -56,6 +56,37 @@ Server runs at `http://0.0.0.0:8081` (or `PORT` from env, e.g. 7860 on Hugging F
   "timeout": 60000,
   "sse_read_timeout": 60000
 }
+```
+
+## API Usage Examples
+
+### Web Search
+```bash
+# Search for information
+curl -X POST "http://localhost:8081/tools/search_web_tool" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "python web scraping", "max_results": 5}'
+```
+
+### Scrape a Single Page
+```bash
+curl -X POST "http://localhost:8081/tools/scrape_url_tool" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+```
+
+### List Links on a Page
+```bash
+curl -X POST "http://localhost:8081/tools/list_links_tool" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com", "same_domain_only": true}'
+```
+
+### Recursive Crawl
+```bash
+curl -X POST "http://localhost:8081/tools/scrape_links_tool" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com", "max_pages": 10}'
 ```
 
 ## Project Structure
@@ -78,3 +109,7 @@ flocrawl/
 
 - Python 3.11+
 - httpx, beautifulsoup4, ddgs, fastmcp
+
+## License
+
+MIT License
