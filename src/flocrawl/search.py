@@ -11,8 +11,10 @@ from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
-# Backends to try in order (ddgs aggregates from multiple engines)
-_SEARCH_BACKENDS = ["bing,duckduckgo,brave", "bing,duckduckgo", "bing", "duckduckgo"]
+# Backends to try in order. Bing is disabled in recent ddgs; use only available ones:
+# brave, duckduckgo, google, grokipedia, mojeek, wikipedia, yahoo, yandex
+# grokipedia often has connection errors; prefer duckduckgo, brave, google
+_SEARCH_BACKENDS = ["duckduckgo", "brave", "google", "duckduckgo,brave", "yandex", "yahoo", "mojeek", "wikipedia"]
 _DEFAULT_TIMEOUT = int(os.getenv("SEARCH_TIMEOUT", "15"))
 
 
@@ -42,7 +44,10 @@ def _search_ddgs(
     max_results: int,
     region: str,
 ) -> List[Dict[str, Any]]:
-    """Search using DDGS metasearch (Bing, DuckDuckGo, Brave, etc.)."""
+    """Search using DDGS metasearch (DuckDuckGo, Brave, Google, etc.)."""
+    # Suppress noisy ddgs/primp warnings (KeyError, impersonate, engine errors)
+    for _logger in ("ddgs.ddgs", "primp.impersonate", "primp"):
+        logging.getLogger(_logger).setLevel(logging.ERROR)
     try:
         from ddgs import DDGS
     except ImportError as e:
