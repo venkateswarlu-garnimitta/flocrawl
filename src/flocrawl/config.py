@@ -41,5 +41,5 @@ def get_use_browser_fallback() -> bool:
 
 
 def get_browser_wait_after_load_ms() -> int:
-    """Milliseconds to wait after page load for JS-rendered content (e.g. Google Docs)."""
+    """Milliseconds to wait after page load for JS-rendered content."""
     return int(os.getenv("CRAWL_BROWSER_WAIT_MS", "3000"))

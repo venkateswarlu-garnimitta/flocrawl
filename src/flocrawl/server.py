@@ -47,13 +47,13 @@ mcp = FastMCP(
         "to crawl and scrape multiple pages from a starting URL."
     ),
     json_response=True,
-    streamable_http_path="/",
+    streamable_http_path="/flocrawl/mcp",
     transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
     stateless_http=True,
 )
 
 
-@mcp.custom_route("/.well-known/flocrawl-mcp", methods=["GET"])
+@mcp.custom_route("/flocrawl/mcp", methods=["GET"])
 async def discovery(_request: Request) -> JSONResponse:
     """Discovery endpoint for transport detection."""
     return JSONResponse({
@@ -177,7 +177,7 @@ async def main() -> None:
 
     logger.info(
         f"Flocrawl MCP Server starting on http://{host}:{port}\n"
-        "Streamable HTTP at / | Discovery at /.well-known/flocrawl-mcp"
+        "Streamable HTTP and discovery at /flocrawl/mcp"
     )
 
     await mcp.run_streamable_http_async()

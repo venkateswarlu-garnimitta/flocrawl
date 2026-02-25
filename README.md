@@ -1,54 +1,34 @@
----
-title: Flocrawl MCP
-emoji: 🔍
-colorFrom: green
-colorTo: pink
-sdk: docker
-app_port: 7860
-pinned: false
-license: mit
-short_description: Flocrawl is a web scraping MCP tool developed by Flotorch.
----
-
 # Flocrawl MCP Server
 
-MCP server for web search, scraping, link discovery, and recursive crawling.
-No API keys required—search and scraping run without token-based services.
+MCP server for web search, scraping, link discovery, and recursive crawling. No API keys required.
 
 ## Quick Start
 
 ```bash
-cd flocrawl
 pip install -e .
 python -m flocrawl
 ```
 
-Server runs at `http://0.0.0.0:8081` (or `PORT` from env, e.g. 7860 on Hugging Face).
+Server runs at `http://0.0.0.0:8081` (override with `PORT` and `HOST` environment variables).
 
-### JavaScript-rendered pages (e.g. Google Docs)
+### Optional: JavaScript-rendered content
 
-Sites that require JavaScript (like Google Docs) return a “enable JavaScript” page when fetched with plain HTTP. Flocrawl handles this in two ways:
-
-1. **Google Docs/Sheets Export URLs**: For `docs.google.com/document/d/...` and `docs.google.com/spreadsheets/d/...` URLs, Flocrawl automatically tries the plain text export endpoint first (`/export?format=txt` for docs, `/export?format=tsv` for sheets), which works for public documents and spreadsheets without requiring JavaScript.
-
-2. **Headless Browser Fallback**: For other JS-heavy sites or when export URLs don't work, install the optional browser backend:
+For sites that require a browser to render content, install the optional backend:
 
 ```bash
 pip install -e ".[browser]"
 playwright install chromium
 ```
 
-With the browser backend installed, the server will automatically use a headless Chromium browser when it detects a JS-required response, with stealth options to avoid detection.
-
-For Docker, add to your image: install `requirements-browser.txt` and run `playwright install chromium` (and install system deps for Chromium if using a slim image).
+When installed, the server will use it automatically when needed. For Docker, add `requirements-browser.txt` and run `playwright install chromium` (and install Chromium system dependencies if using a slim base image).
 
 ## Tools
 
 | Tool | Description |
 |------|-------------|
 | `search_web_tool` | Web search; returns titles, URLs, snippets |
-| `scrape_url_tool` | Scrape a single URL; extract main text |
-| `list_links_tool` | List all links on a page |
+| `scrape_url_tool` | Scrape a URL; extract main text |
+| `list_links_tool` | List links on a page |
 | `scrape_links_tool` | List links, then scrape each (crawl) |
 
 ## Configuration
@@ -58,67 +38,51 @@ For Docker, add to your image: install `requirements-browser.txt` and run `playw
 | `PORT` | 8081 | Server port |
 | `HOST` | 0.0.0.0 | Bind address |
 | `CRAWL_MAX_PAGE_SIZE` | 1048576 | Max bytes per page (1MB) |
-| `CRAWL_MAX_LINKS_PER_PAGE` | 100 | Max links to extract per page |
+| `CRAWL_MAX_LINKS_PER_PAGE` | 100 | Max links per page |
 | `CRAWL_MAX_PAGES` | 20 | Max pages for scrape_links |
 | `CRAWL_REQUEST_TIMEOUT` | 30 | HTTP timeout (seconds) |
 | `CRAWL_USER_AGENT` | Flocrawl/1.0 | User-Agent header |
-| `CRAWL_USE_BROWSER_FALLBACK` | true | Use Playwright when page requires JavaScript (e.g. Google Docs) |
-| `CRAWL_BROWSER_WAIT_MS` | 3000 | Ms to wait after load for JS-rendered content |
+| `CRAWL_USE_BROWSER_FALLBACK` | true | Use browser when response indicates JS-only content |
+| `CRAWL_BROWSER_WAIT_MS` | 3000 | Wait after load for JS-rendered content (ms) |
 | `SEARCH_TIMEOUT` | 20 | Search request timeout (seconds) |
-| `SEARCH_BACKEND_DELAY` | 1.0 | Delay between backend attempts (reduces rate limiting) |
-| `SEARCH_RATE_LIMIT_DELAY` | 3.0 | Extra delay after 429 (seconds) |
+| `SEARCH_BACKEND_DELAY` | 1.0 | Delay between search backend attempts |
+| `SEARCH_RATE_LIMIT_DELAY` | 3.0 | Delay after rate limit (seconds) |
 
 ## MCP Client Configuration
 
 ```json
 {
   "transport": "HTTP_STREAMABLE",
-  "url": "http://localhost:8081",
+  "url": "http://localhost:8081/flocrawl/mcp",
   "timeout": 60000,
   "sse_read_timeout": 60000
 }
 ```
 
-## API Usage Examples
+### Gateway / reverse proxy (AWS, Kubernetes, etc.)
 
-### Web Search
-```bash
-# Search for information
-curl -X POST "http://localhost:8081/tools/search_web_tool" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "python web scraping", "max_results": 5}'
-```
+MCP endpoint: **`/flocrawl/mcp`**. Allow **POST** (required) and **GET** (optional, for discovery).
 
-### Scrape a Single Page
-```bash
-curl -X POST "http://localhost:8081/tools/scrape_url_tool" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com"}'
-```
+| Purpose | Path | Method |
+|--------|------|--------|
+| MCP protocol | `/flocrawl/mcp` | POST |
+| Discovery | `/flocrawl/mcp` | GET |
 
-### List Links on a Page
-```bash
-curl -X POST "http://localhost:8081/tools/list_links_tool" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com", "same_domain_only": true}'
-```
+Configure the gateway backend URL to the service root plus path, e.g. `http://<service>:<port>/flocrawl/mcp`, and allow POST (and optionally GET) on that path.
 
-### Recursive Crawl
-```bash
-curl -X POST "http://localhost:8081/tools/scrape_links_tool" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com", "max_pages": 10}'
-```
+## Usage
 
-## Project Structure
+Connect your MCP client to `http://<host>:<port>/flocrawl/mcp` using the HTTP_STREAMABLE transport. The server exposes the tools listed above over the MCP protocol.
+
+## Project structure
 
 ```
 flocrawl/
 ├── src/flocrawl/
-│   ├── config.py    # Env and limits
-│   ├── search.py    # Web search (DDGS metasearch: Bing, DuckDuckGo, etc.)
-│   ├── scraper.py   # Scrape, list links, crawl
-│   ├── server.py    # FastMCP server and tools
+│   ├── config.py
+│   ├── search.py
+│   ├── scraper.py
+│   ├── server.py
 │   ├── __init__.py
 │   └── __main__.py
 ├── pyproject.toml
@@ -129,8 +93,8 @@ flocrawl/
 ## Requirements
 
 - Python 3.11+
-- httpx, beautifulsoup4, ddgs, fastmcp
-- Optional: `playwright` (install with `pip install flocrawl[browser]` and run `playwright install chromium`) for JavaScript-heavy sites like Google Docs
+- Core: httpx, beautifulsoup4, ddgs, fastmcp
+- Optional: `playwright` (install with `pip install flocrawl[browser]` and `playwright install chromium`) for JavaScript-rendered pages
 
 ## License
 
