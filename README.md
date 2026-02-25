@@ -59,6 +59,24 @@ When installed, the server will use it automatically when needed. For Docker, ad
 }
 ```
 
+### Hugging Face Hub MCP Settings
+
+When adding flocrawl from [Hugging Face Hub MCP settings](https://huggingface.co/settings/mcp), use HTTP_STREAMABLE with your deployed URL. If the server is behind HF auth, add the optional Authorization header:
+
+```json
+{
+  "transport": "HTTP_STREAMABLE",
+  "url": "http://localhost:8081/flocrawl/mcp",
+  "timeout": 60000,
+  "sse_read_timeout": 60000,
+  "headers": {
+    "Authorization": "Bearer <YOUR_HF_TOKEN>"
+  }
+}
+```
+
+> A valid Hugging Face token with READ permissions is required when using MCP tools through Hub. Create one at [hf.co/settings/tokens](https://huggingface.co/settings/tokens).
+
 ### Gateway / reverse proxy (AWS, Kubernetes, etc.)
 
 MCP endpoint: **`/flocrawl/mcp`**. Allow **POST** (required) and **GET** (optional, for discovery).
