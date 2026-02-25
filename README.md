@@ -1,3 +1,18 @@
+---
+title: Flocrawl MCP Server
+emoji: 🌐
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+short_description: MCP server for web search, scraping, link discovery, and recursive crawling. No API keys.
+tags:
+  - mcp
+  - web-search
+  - scraping
+  - crawling
+---
+
 # Flocrawl MCP Server
 
 MCP server for web search, scraping, link discovery, and recursive crawling. No API keys required.
