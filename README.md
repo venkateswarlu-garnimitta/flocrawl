@@ -5,7 +5,7 @@ colorFrom: blue
 colorTo: indigo
 sdk: docker
 app_port: 7860
-short_description: MCP server for web search, scraping, link discovery, and recursive crawling. No API keys.
+short_description: MCP server for web search, scraping & crawling. No API keys.
 tags:
   - mcp
   - web-search
